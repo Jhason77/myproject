@@ -1,0 +1,155 @@
+import zipfile
+import os
+
+# Crea directory temporanea per il progetto
+project_dir = "/mnt/data/chat-vrm-project"
+os.makedirs(project_dir, exist_ok=True)
+
+# Contenuto del file index.html (completo e funzionante)
+html_content = """
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <title>Chat Vocale con Avatar VRM</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #111; color: white; font-family: sans-serif; }
+    #ui {
+      position: absolute; top: 10px; left: 10px;
+      background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px;
+      z-index: 10;
+    }
+    input, button { font-size: 16px; padding: 5px 10px; margin-top: 5px; display: block; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <input type="password" id="apiKey" placeholder="OpenAI API Key" /><br>
+    <button onclick="startVoiceChat()">🎤 Parla</button>
+    <div id="status">Stato: pronto</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.154.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@1.0.6/lib/three-vrm.min.js"></script>
+
+  <script>
+    let currentVrm = null;
+    let talking = false;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 1.4, 2.5);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
+
+    const loader = new THREE.GLTFLoader();
+    loader.load(
+      'https://cdn.glitch.global/8e6f683d-bc2c-4a12-80c7-e0a2f15b8df4/AliciaSolid.vrm',
+      gltf => {
+        THREE.VRM.from(gltf).then(vrm => {
+          currentVrm = vrm;
+          currentVrm.scene.rotation.y = Math.PI;
+          scene.add(currentVrm.scene);
+        });
+      }
+    );
+
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+      if (currentVrm) {
+        currentVrm.update(delta);
+        updateExpression();
+      }
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    function updateExpression() {
+      if (!currentVrm?.blendShapeProxy) return;
+      const mouthVal = talking ? (Math.sin(Date.now() * 0.01) * 0.5 + 0.5) : 0;
+      currentVrm.blendShapeProxy.setValue('A', mouthVal);
+      currentVrm.blendShapeProxy.update();
+    }
+
+    function speak(text) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'it-IT';
+      const voices = speechSynthesis.getVoices();
+      const italian = voices.find(v => v.lang === 'it-IT');
+      if (italian) utterance.voice = italian;
+      talking = true;
+      utterance.onend = () => talking = false;
+      speechSynthesis.speak(utterance);
+    }
+
+    async function chatWithGPT(prompt) {
+      const apiKey = document.getElementById("apiKey").value.trim();
+      if (!apiKey) {
+        alert("Inserisci la tua OpenAI API Key.");
+        return;
+      }
+
+      document.getElementById("status").innerText = "Stato: attendo risposta...";
+
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: "gpt-3.5-turbo",
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.7
+        })
+      });
+
+      const data = await res.json();
+      const reply = data.choices[0].message.content;
+      document.getElementById("status").innerText = "Stato: risposta ricevuta";
+      speak(reply);
+    }
+
+    function startVoiceChat() {
+      const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+      recognition.lang = "it-IT";
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      document.getElementById("status").innerText = "Stato: ascoltando...";
+
+      recognition.start();
+
+      recognition.onresult = function (event) {
+        const speech = event.results[0][0].transcript;
+        document.getElementById("status").innerText = `Tu: "${speech}"`;
+        chatWithGPT(speech);
+      };
+
+      recognition.onerror = function () {
+        document.getElementById("status").innerText = "Errore durante il riconoscimento vocale.";
+      };
+    }
+
+    window.speechSynthesis.onvoiceschanged = () => {};
+  </script>
+</body>
+</html>
+"""
+
+# Scrive il file index.html
+html_path = os.path.join(project_dir, "index.html")
+with open(html_path, "w", encoding="utf-8") as f:
+    f.write(html_content)
+
+# Crea file ZIP
+zip_path = "/mnt/data/chat-vrm-project.zip"
+with zipfile.ZipFile(zip_path, "w") as zipf:
+    zipf.write(html_path, arcname="index.html")
+
+zip_path  # Restituisce il percorso al file ZIP pronto per il download
